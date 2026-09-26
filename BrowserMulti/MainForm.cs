@@ -504,7 +504,7 @@ public class MainForm : Form
                 ? "自动"
                 : _browsers.FirstOrDefault(b => b.Id == inst.BrowserId)?.Name ?? "自动";
 
-            bool isRunning = running.Contains(InstanceManager.GetDataDir(inst));
+            bool isRunning = running.Contains(_manager.GetDataDir(inst));
 
             var item = new ListViewItem(inst.Name);
             item.SubItems.Add(string.IsNullOrWhiteSpace(inst.Group) ? "—" : inst.Group);
@@ -571,7 +571,7 @@ public class MainForm : Form
         foreach (ListViewItem item in _list.Items)
         {
             if (item.Tag is not InstanceConfig inst) continue;
-            bool isRunning = running.Contains(InstanceManager.GetDataDir(inst));
+            bool isRunning = running.Contains(_manager.GetDataDir(inst));
             item.SubItems[5].Text = isRunning ? "运行中" : "未运行";
             item.SubItems[5].ForeColor = isRunning ? Color.FromArgb(0, 138, 92) : Color.Gray;
         }
@@ -625,7 +625,7 @@ public class MainForm : Form
         {
             var sizes = new Dictionary<string, long>();
             foreach (var inst in snapshot)
-                sizes[inst.Id] = GetDirSize(InstanceManager.GetDataDir(inst));
+                sizes[inst.Id] = GetDirSize(_manager.GetDataDir(inst));
 
             // 后台线程不能直接读窗体的 IsDisposed / 调 BeginInvoke：
             // 窗体可能已销毁，此处统一 try 兜底，避免 ObjectDisposedException 冒泡到全局异常。
@@ -696,11 +696,52 @@ public class MainForm : Form
             inst.FpSeed = Guid.NewGuid().ToString("N");
             _manager.Save();
         }
-        FingerprintExtension.Write(inst);
+        var tz = ResolveTimeZone(inst);
+        FingerprintExtension.Write(inst, _manager.BaseDir, tz);
+    }
+
+    /// <summary>
+    /// 解析实例应使用的时区：
+    ///   TimeZone == "off"  → 返回 NoTimeZoneTag（不伪装）
+    ///   TimeZone 非空      → 手动指定值
+    ///   TimeZone 为空      → 自动：有代理则跟随代理出口地区（带缓存），否则用默认时区
+    /// </summary>
+    private string ResolveTimeZone(InstanceConfig inst)
+    {
+        var tz = inst.TimeZone?.Trim() ?? "";
+        if (FingerprintExtension.IsNoTimeZone(tz))
+            return FingerprintExtension.NoTimeZoneTag;
+        if (tz.Length > 0)
+            return tz;
+
+        if (string.IsNullOrWhiteSpace(inst.ProxyServer))
+            return TimeZoneMap.DefaultTimeZone;
+
+        var geo = GetProxyGeo(inst.ProxyServer);
+        if (geo.Success)
+        {
+            Log.Info($"实例 {inst.Name} 时区跟随代理地区：{geo.Detail} → {geo.TimeZone}");
+            return geo.TimeZone;
+        }
+
+        Log.Warn($"实例 {inst.Name} 代理地区探测失败（{geo.Detail}），时区回退为 {TimeZoneMap.DefaultTimeZone}");
+        SetStatus($"提示：「{inst.Name}」无法确认代理地区，时区已按默认处理");
+        return TimeZoneMap.DefaultTimeZone;
+    }
+
+    /// <summary>代理地区探测结果缓存（key = 代理地址），避免每次启动都联网。</summary>
+    private readonly Dictionary<string, ProxyGeoLookup.GeoResult> _geoCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private ProxyGeoLookup.GeoResult GetProxyGeo(string proxyServer)
+    {
+        if (_geoCache.TryGetValue(proxyServer, out var cached)) return cached;
+        var r = ProxyGeoLookup.Lookup(proxyServer);
+        _geoCache[proxyServer] = r;
+        return r;
     }
 
     /// <summary>构造实例的浏览器启动参数（启动与快捷方式共用）。</summary>
-    private static string BuildArgs(InstanceConfig inst, string dataDir)
+    private string BuildArgs(InstanceConfig inst, string dataDir)
     {
         var args = new StringBuilder();
         args.Append("--user-data-dir=\"").Append(dataDir).Append("\"");
@@ -713,7 +754,7 @@ public class MainForm : Form
             args.Append(" --disable-features=UserAgentClientHint");
         }
         if (inst.FpEnabled)
-            args.Append(" --load-extension=\"").Append(FingerprintExtension.GetDir(inst)).Append("\"");
+            args.Append(" --load-extension=\"").Append(FingerprintExtension.GetDir(inst, _manager.BaseDir)).Append("\"");
         if (!string.IsNullOrWhiteSpace(inst.ExtraArgs))
             args.Append(' ').Append(inst.ExtraArgs.Trim());
         if (!string.IsNullOrWhiteSpace(inst.HomePage))
@@ -738,7 +779,7 @@ public class MainForm : Form
             return;
         }
 
-        string dataDir = InstanceManager.GetDataDir(inst);
+        string dataDir = _manager.GetDataDir(inst);
         try
         {
             Directory.CreateDirectory(dataDir);
@@ -855,6 +896,7 @@ public class MainForm : Form
             FpEnabled = dlg.FpEnabled,
             FpSeed = Guid.NewGuid().ToString("N"),
             ProxyServer = dlg.ProxyServer,
+            TimeZone = dlg.TimeZoneValue,
             ExtraArgs = dlg.ExtraArgs,
             Note = dlg.Note
         };
@@ -893,6 +935,7 @@ public class MainForm : Form
         inst.UserAgent = dlg.UserAgent;
         inst.FpEnabled = dlg.FpEnabled;
         inst.ProxyServer = dlg.ProxyServer;
+        inst.TimeZone = dlg.TimeZoneValue;
         inst.ExtraArgs = dlg.ExtraArgs;
         inst.Note = dlg.Note;
         if (inst.FpEnabled && string.IsNullOrWhiteSpace(inst.FpSeed))
@@ -941,9 +984,9 @@ public class MainForm : Form
         {
             _manager.Config.Instances.Remove(inst);
             if (!deleteData) continue;
-            try { Directory.Delete(InstanceManager.GetDataDir(inst), true); }
+            try { Directory.Delete(_manager.GetDataDir(inst), true); }
             catch (Exception ex) { Log.Warn($"删除数据目录失败 {inst.Name}：{ex.Message}"); }
-            try { Directory.Delete(FingerprintExtension.GetDir(inst), true); }
+            try { Directory.Delete(FingerprintExtension.GetDir(inst, _manager.BaseDir), true); }
             catch { /* 同上 */ }
         }
 
@@ -966,14 +1009,14 @@ public class MainForm : Form
     }
 
     private bool IsInstanceRunning(InstanceConfig inst)
-        => GetRunningDataDirs().Contains(InstanceManager.GetDataDir(inst));
+        => GetRunningDataDirs().Contains(_manager.GetDataDir(inst));
 
     // ==================== 工具功能 ====================
 
     private void OpenDataDir()
     {
         if (!TryGetSingleSelected(out var inst)) return;
-        string dir = InstanceManager.GetDataDir(inst);
+        string dir = _manager.GetDataDir(inst);
         try
         {
             Directory.CreateDirectory(dir);
@@ -1013,8 +1056,12 @@ public class MainForm : Form
         sb.AppendLine($"UserAgent：{UaPresets.DisplayName(inst.UserAgent)}");
         sb.AppendLine($"指纹防护：{(inst.FpEnabled ? "已开启" : "已关闭")}");
         sb.AppendLine($"代理：{(string.IsNullOrWhiteSpace(inst.ProxyServer) ? "直连" : inst.ProxyServer)}");
+        var tzShow = string.IsNullOrWhiteSpace(inst.TimeZone)
+            ? (string.IsNullOrWhiteSpace(inst.ProxyServer) ? "自动（中国时区）" : "自动（跟随代理地区）")
+            : inst.TimeZone == "off" ? "不伪装" : inst.TimeZone;
+        sb.AppendLine($"时区：{tzShow}");
         sb.AppendLine($"启动页：{(string.IsNullOrWhiteSpace(inst.HomePage) ? "—" : inst.HomePage)}");
-        sb.AppendLine($"数据目录：{InstanceManager.GetDataDir(inst)}");
+        sb.AppendLine($"数据目录：{_manager.GetDataDir(inst)}");
         sb.AppendLine($"创建时间：{inst.CreatedAt:yyyy-MM-dd HH:mm}");
         try
         {
@@ -1039,7 +1086,7 @@ public class MainForm : Form
             return;
         }
 
-        string dir = InstanceManager.GetDataDir(inst);
+        string dir = _manager.GetDataDir(inst);
         long freed = 0;
         int failed = 0;
         foreach (var sub in new[]
@@ -1095,7 +1142,7 @@ public class MainForm : Form
                 dynamic shell = Activator.CreateInstance(shellType)!;
                 dynamic sc = shell.CreateShortcut(lnkPath);
                 sc.TargetPath = browser.ExePath;
-                sc.Arguments = BuildArgs(inst, InstanceManager.GetDataDir(inst));
+                sc.Arguments = BuildArgs(inst, _manager.GetDataDir(inst));
                 sc.WorkingDirectory = Path.GetDirectoryName(browser.ExePath) ?? "";
                 sc.IconLocation = $"{browser.ExePath},0";
                 sc.Description = $"多开实例「{inst.Name}」- 独立数据目录，Cookie 隔离";
@@ -1263,8 +1310,15 @@ public class MainForm : Form
             "        WebRTC 内网 IP、CPU/内存/触点、移动端屏幕\n" +
             "  仅对 Microsoft Edge 生效（Chrome 137+ 已移除扩展加载参数）\n" +
             "  每个实例指纹独立且稳定，不会每次启动都变\n\n" +
+            "【时区与代理】\n" +
+            "  实例的时区可自动跟随代理出口地区，避免「境外 IP + 中国时区」\n" +
+            "  这种一眼可见的矛盾。在实例编辑的「高级」页可切换：\n" +
+            "    · 自动  —— 有代理则查询代理地区并套用对应时区\n" +
+            "    · 指定  —— 固定使用某个时区（与代理无关）\n" +
+            "    · 不伪装 —— 保持浏览器真实时区\n" +
+            "  注意：查询代理地区需要联网，失败时会回退为中国时区。\n\n" +
             "【已知限制】\n" +
-            "  · 不含 IP 隔离：代理留空即直连，同 IP 多账号可能被平台关联\n" +
+            "  · 代理留空即直连；同 IP 多账号仍可能被平台关联，建议配合独立代理\n" +
             "  · 跨电脑迁移时 Cookie 与密码因系统加密需重新登录\n" +
             "  · 浏览器内核为系统已安装的 Edge/Chrome，本程序不含内核";
 
