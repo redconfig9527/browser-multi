@@ -33,6 +33,7 @@ public class MainForm : Form
     public MainForm()
     {
         _browsers = BrowserDetector.Detect();
+        BuildBrowserChoices();
         _manager = new InstanceManager();
         Log.Init(_manager.Config.Settings.LogEnabled);
 
@@ -1142,6 +1143,15 @@ public class MainForm : Form
             MessageBox.Show("导入失败：" + ex.Message + "\n\n请确认文件是本工具导出的配置文件。",
                 "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>根据检测到的浏览器构建下拉选项（自动 + 各已装浏览器）。</summary>
+    private void BuildBrowserChoices()
+    {
+        _browserChoices.Clear();
+        _browserChoices.Add(new BrowserChoice("auto", "自动（默认浏览器）"));
+        foreach (var b in _browsers)
+            _browserChoices.Add(new BrowserChoice(b.Id, b.Name));
     }
 
     private void OpenSettings()
