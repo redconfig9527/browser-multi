@@ -25,20 +25,33 @@ public static class FingerprintExtension
     {
         string dir = GetDir(inst);
         Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "manifest.json"), ManifestJson);
-        File.WriteAllText(Path.Combine(dir, "fp.js"), BuildScript(inst));
+        WriteAtomic(Path.Combine(dir, "manifest.json"), ManifestJson);
+        WriteAtomic(Path.Combine(dir, "fp.js"), BuildScript(inst));
+    }
+
+    /// <summary>原子写入：先写临时文件再替换，避免中断产生半截文件导致扩展加载失败。</summary>
+    private static void WriteAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, content, new System.Text.UTF8Encoding(false));
+        if (File.Exists(path)) File.Replace(tmp, path, null);
+        else File.Move(tmp, path);
     }
 
     private static int ParseSeed(InstanceConfig inst)
     {
         if (string.IsNullOrWhiteSpace(inst.FpSeed)) return 12345;
-        try
+        // 对整个种子串做 FNV-1a 散列，比只取前 8 位十六进制更均匀，且不会因长度不足而失败
+        unchecked
         {
-            return unchecked((int)Convert.ToInt32(inst.FpSeed[..8], 16));
-        }
-        catch
-        {
-            return 12345;
+            uint h = 2166136261;
+            foreach (char c in inst.FpSeed)
+            {
+                h ^= c;
+                h *= 16777619;
+            }
+            int v = (int)(h & 0x7FFFFFFF);
+            return v == 0 ? 12345 : v;
         }
     }
 
