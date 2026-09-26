@@ -10,7 +10,7 @@
     <RootNamespace>BrowserMulti</RootNamespace>
     <AssemblyName>BrowserMulti</AssemblyName>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.5.0</Version>
+    <Version>1.6.0</Version>
     <Authors>jtxu9527</Authors>
     <Company>jtxu9527</Company>
     <Product>浏览器多开管理器</Product>
