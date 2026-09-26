@@ -114,7 +114,9 @@ public class InstanceDialog : Form
         foreach (var p in UaPresets.All) _comboUa.Items.Add(p.Name);
         int presetIdx = UaPresets.All.ToList().FindIndex(p => p.Value == src.UserAgent);
         bool isCustom = presetIdx < 0 && !string.IsNullOrWhiteSpace(src.UserAgent);
-        _comboUa.SelectedIndex = isCustom ? UaPresets.All.Length - 1 : Math.Max(0, presetIdx);
+        _comboUa.SelectedIndex = isCustom
+            ? UaPresets.All.Length - 1
+            : (presetIdx >= 0 ? presetIdx : 0);
         page.Controls.Add(_comboUa);
 
         _txtUa.SetBounds(120, 52, 330, 25);
@@ -215,11 +217,14 @@ public class InstanceDialog : Form
             return;
         }
 
-        UserAgent = (_comboUa.SelectedItem as string) == "自定义…"
+        int sel = _comboUa.SelectedIndex;
+        bool customSelected = sel >= 0 && sel < UaPresets.All.Length
+                              && UaPresets.All[sel].Value == UaPresets.CustomKey;
+        UserAgent = customSelected
             ? _txtUa.Text.Trim()
-            : UaPresets.All[_comboUa.SelectedIndex].Value;
+            : (sel >= 0 && sel < UaPresets.All.Length ? UaPresets.All[sel].Value : "");
 
-        if ((_comboUa.SelectedItem as string) == "自定义…" && UserAgent.Length == 0)
+        if (customSelected && UserAgent.Length == 0)
         {
             _tabs.SelectedIndex = 1;
             Fail("选择了自定义 UserAgent，请输入完整字符串。");
