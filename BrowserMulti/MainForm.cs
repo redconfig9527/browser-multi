@@ -23,6 +23,7 @@ public class MainForm : Form
     private System.Windows.Forms.Timer _timer = null!;
     private readonly NotifyIcon _tray = new();
     private bool _reallyExit;
+    private bool _closing;
     private bool _trayHintShown;
     private int _sortColumn = -1;
     private bool _sortAscending = true;
@@ -42,7 +43,13 @@ public class MainForm : Form
         MinimumSize = new Size(820, 520);
         ApplyWindowSettings();
         Font = new Font("Microsoft YaHei UI", 9F);
-        try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "") ?? SystemIcons.Application; }
+        try
+        {
+            var appIcon = string.IsNullOrEmpty(Environment.ProcessPath)
+                ? null
+                : Icon.ExtractAssociatedIcon(Environment.ProcessPath);
+            Icon = appIcon ?? SystemIcons.Application;
+        }
         catch { Icon = SystemIcons.Application; }
 
         BuildUi();
@@ -184,15 +191,27 @@ public class MainForm : Form
     private static ToolStripMenuItem MenuItem(string text, Keys shortcut, Action action)
     {
         var item = new ToolStripMenuItem(text);
-        // ShortcutKeys 仅接受功能键或含 Ctrl/Alt 的组合键；
-        // 裸 Delete/Enter 等会抛 InvalidEnumArgumentException，此处做防御。
-        if (shortcut != Keys.None && (shortcut & Keys.Modifiers) != Keys.None)
+        // ShortcutKeys 只接受「功能键」或「含 Ctrl/Alt/Shift 的组合键」；
+        // 裸 Delete/Enter/字母 会抛 InvalidEnumArgumentException，故此处按类型放行：
+        //   - 含修饰键（Ctrl/Alt/Shift）
+        //   - 纯功能键（F1~F24，键值 0x70 起）—— 原实现误把 F1/F2 排除了
+        if (shortcut != Keys.None && IsValidShortcut(shortcut))
         {
             item.ShortcutKeys = shortcut;
             item.ShowShortcutKeys = true;
         }
+        // 无效组合（如裸 Delete）：不设 ShortcutKeys，仅由 ProcessCmdKey 统一处理
         item.Click += (_, _) => action();
         return item;
+    }
+
+    /// <summary>判断是否为 ShortcutKeys 可接受的组合（防 InvalidEnumArgumentException）。</summary>
+    private static bool IsValidShortcut(Keys shortcut)
+    {
+        var mods = shortcut & Keys.Modifiers;
+        if (mods != Keys.None) return true;                 // Ctrl/Alt/Shift 组合
+        var key = shortcut & Keys.KeyCode;
+        return key >= Keys.F1 && key <= Keys.F24;           // 纯功能键
     }
 
     private Control BuildToolbar()
@@ -325,7 +344,7 @@ public class MainForm : Form
         menu.Items.Add("删除", null, (_, _) => DeleteInstance());
         _list.ContextMenuStrip = menu;
 
-        _tray.Icon = Icon;
+        _tray.Icon = Icon ?? SystemIcons.Application;
         _tray.Text = AppMeta.Name;
         _tray.Visible = true;
         _tray.DoubleClick += (_, _) => ShowFromTray();
@@ -403,10 +422,22 @@ public class MainForm : Form
     private void FitColumns()
     {
         if (_list.Width < 50) return;
+        int cols = _list.Columns.Count;
+        if (cols == 0) return;
         int total = _list.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4;
-        int sum = ColWeights.Sum();
-        for (int i = 0; i < _list.Columns.Count; i++)
-            _list.Columns[i].Width = Math.Max(50, total * ColWeights[i] / sum);
+        if (total <= 0) return;
+
+        // 权重数组与列数可能不一致（增删列时），此处按较小值取用，缺失的按平均权重兜底
+        int n = Math.Min(cols, ColWeights.Length);
+        int sum = 0;
+        for (int i = 0; i < n; i++) sum += ColWeights[i];
+        if (n < cols) sum += (cols - n) * 10; // 未定义权重的列按 10 计
+
+        for (int i = 0; i < cols; i++)
+        {
+            int w = i < ColWeights.Length ? ColWeights[i] : 10;
+            _list.Columns[i].Width = Math.Max(50, total * w / sum);
+        }
     }
 
     private string FilterText => _txtSearch.Text.Trim();
@@ -595,15 +626,24 @@ public class MainForm : Form
             var sizes = new Dictionary<string, long>();
             foreach (var inst in snapshot)
                 sizes[inst.Id] = GetDirSize(InstanceManager.GetDataDir(inst));
-            if (IsDisposed) return;
-            BeginInvoke(() =>
+
+            // 后台线程不能直接读窗体的 IsDisposed / 调 BeginInvoke：
+            // 窗体可能已销毁，此处统一 try 兜底，避免 ObjectDisposedException 冒泡到全局异常。
+            try
             {
-                foreach (ListViewItem item in _list.Items)
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke(() =>
                 {
-                    if (item.Tag is InstanceConfig ci && sizes.TryGetValue(ci.Id, out var sz))
-                        item.SubItems[6].Text = sz == 0 ? "—" : FormatSize(sz);
-                }
-            });
+                    if (IsDisposed) return;
+                    foreach (ListViewItem item in _list.Items)
+                    {
+                        if (item.Tag is InstanceConfig ci && sizes.TryGetValue(ci.Id, out var sz))
+                            item.SubItems[6].Text = sz == 0 ? "—" : FormatSize(sz);
+                    }
+                });
+            }
+            catch (ObjectDisposedException) { /* 窗体已关闭，忽略 */ }
+            catch (InvalidOperationException) { /* 句柄未创建，忽略 */ }
         });
     }
 
@@ -638,7 +678,12 @@ public class MainForm : Form
         if (id == "auto")
             id = _manager.Config.Settings.DefaultBrowserId;
         if (id == "auto")
+        {
+            // 自动模式优先 Edge：指纹防护扩展仅 Edge 支持（Chrome 137+ 已移除 --load-extension）
+            var fpEdge = _browsers.FirstOrDefault(b => b.Id == "edge");
+            if (inst.FpEnabled && fpEdge != null) return fpEdge;
             return _browsers.FirstOrDefault(b => b.Id == "chrome") ?? _browsers.FirstOrDefault();
+        }
         return _browsers.FirstOrDefault(b => b.Id == id) ?? _browsers.FirstOrDefault();
     }
 
@@ -661,10 +706,10 @@ public class MainForm : Form
         args.Append("--user-data-dir=\"").Append(dataDir).Append("\"");
         args.Append(" --no-first-run --no-default-browser-check");
         if (!string.IsNullOrWhiteSpace(inst.ProxyServer))
-            args.Append(" --proxy-server=\"").Append(inst.ProxyServer).Append("\"");
+            args.Append(" --proxy-server=\"").Append(inst.ProxyServer.Trim()).Append("\"");
         if (!string.IsNullOrWhiteSpace(inst.UserAgent))
         {
-            args.Append(" --user-agent=\"").Append(inst.UserAgent).Append("\"");
+            args.Append(" --user-agent=\"").Append(inst.UserAgent.Trim()).Append("\"");
             args.Append(" --disable-features=UserAgentClientHint");
         }
         if (inst.FpEnabled)
@@ -672,7 +717,14 @@ public class MainForm : Form
         if (!string.IsNullOrWhiteSpace(inst.ExtraArgs))
             args.Append(' ').Append(inst.ExtraArgs.Trim());
         if (!string.IsNullOrWhiteSpace(inst.HomePage))
-            args.Append(' ').Append(inst.HomePage.Trim());
+        {
+            var home = inst.HomePage.Trim();
+            // 启动页必须作为 URL 传入：以 '-' 开头的会被浏览器当成开关，加引号兜底空格
+            if (home.StartsWith('-'))
+                Log.Warn($"实例 {inst.Name} 的启动页以 '-' 开头，已忽略：{home}");
+            else
+                args.Append(" \"").Append(home.Replace("\"", "")).Append('"');
+        }
         return args.ToString();
     }
 
@@ -873,15 +925,17 @@ public class MainForm : Form
         if (running.Count > 0)
             msg += $"\n\n注意：其中 {running.Count} 个实例的浏览器正在运行。";
 
-        if (MessageBox.Show(msg, "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-            != DialogResult.Yes)
+        // 破坏性操作：默认焦点放在「否」，避免误按回车
+        if (MessageBox.Show(msg, "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
 
         var deleteData = MessageBox.Show(
             "是否同时删除这些实例的数据目录？\n\n" +
             "选择「是」：Cookie、登录态、缓存将全部丢失，不可恢复；\n" +
             "选择「否」：仅从列表移除，数据目录保留在 Data\\ 下（之后可重新导入复用）。",
-            "删除数据", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+            "删除数据", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes;
 
         foreach (var inst in targets)
         {
@@ -1126,7 +1180,6 @@ public class MainForm : Form
             "同名实例将自动跳过。",
             "选择导入方式", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
         if (mode == DialogResult.Cancel) return;
-
         try
         {
             var (added, skipped) = _manager.ImportBundle(dlg.FileName, regenerateIdsAndSeeds: mode == DialogResult.No);
@@ -1165,6 +1218,7 @@ public class MainForm : Form
         s.ConfirmDuplicateLaunch = dlg.ConfirmDuplicateLaunch;
         s.LogEnabled = dlg.LogEnabled;
         _manager.Save();
+        Log.SetEnabled(s.LogEnabled);
         UpdateFpWarning();
         SetStatus("设置已保存");
         Log.Info("设置已更新");
@@ -1276,10 +1330,17 @@ public class MainForm : Form
             return;
         }
 
-        SaveWindowSettings();
-        Log.Info("程序退出");
-        _tray.Visible = false;
-        _tray.Dispose();
+        // 幂等：托盘菜单退出会先 Dispose 一次，这里再走一次需避免重复记录/重复释放
+        if (!_closing)
+        {
+            _closing = true;
+            _timer?.Stop();
+            _timer?.Dispose();
+            SaveWindowSettings();
+            Log.Info("程序退出");
+            _tray.Visible = false;
+            _tray.Dispose();
+        }
         base.OnFormClosing(e);
     }
 
