@@ -8,8 +8,14 @@
 /// </summary>
 public static class FingerprintExtension
 {
-    public static string GetDir(InstanceConfig inst) =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Data", "_fp", inst.Id));
+    /// <summary>
+    /// 扩展文件存放目录。默认在程序目录 Data\_fp\&lt;实例ID&gt;；
+    /// 若指定 <paramref name="baseDir"/>（测试用），则以其为根。
+    /// </summary>
+    public static string GetDir(InstanceConfig inst, string? baseDir = null)
+        => Path.GetFullPath(Path.Combine(
+            string.IsNullOrWhiteSpace(baseDir) ? AppContext.BaseDirectory : baseDir,
+            "Data", "_fp", inst.Id));
 
     /// <summary>根据 UA 推断指纹画像，保证 UA 与深层指纹一致。</summary>
     public static string DetectProfile(string userAgent)
@@ -21,12 +27,32 @@ public static class FingerprintExtension
         return "win";
     }
 
-    public static void Write(InstanceConfig inst)
+    /// <summary>表示"不进行时区伪装"的哨兵值，会写入脚本并让其跳过时区覆盖。</summary>
+    public const string NoTimeZoneTag = "__none__";
+
+    /// <summary>
+    /// 判断某个时区配置值是否表示"不伪装"。
+    /// 同时接受内部哨兵值、空串之外的 "off"（用户在界面选择的值），避免调用方漏做转换。
+    /// </summary>
+    public static bool IsNoTimeZone(string? timeZone)
+        => timeZone == NoTimeZoneTag
+           || string.Equals(timeZone?.Trim(), "off", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 生成扩展文件。
+    /// </summary>
+    /// <param name="inst">实例配置</param>
+    /// <param name="baseDir">数据根目录（测试可注入，null 为程序目录）</param>
+    /// <param name="timeZone">
+    /// 目标 IANA 时区（如 Asia/Tokyo）；
+    /// 传 null 使用默认时区，传 <see cref="NoTimeZoneTag"/> 或 "off" 表示不做时区伪装。
+    /// </param>
+    public static void Write(InstanceConfig inst, string? baseDir = null, string? timeZone = null)
     {
-        string dir = GetDir(inst);
+        string dir = GetDir(inst, baseDir);
         Directory.CreateDirectory(dir);
         WriteAtomic(Path.Combine(dir, "manifest.json"), ManifestJson);
-        WriteAtomic(Path.Combine(dir, "fp.js"), BuildScript(inst));
+        WriteAtomic(Path.Combine(dir, "fp.js"), BuildScript(inst, timeZone));
     }
 
     /// <summary>原子写入：先写临时文件再替换，避免中断产生半截文件导致扩展加载失败。</summary>
@@ -75,11 +101,44 @@ public static class FingerprintExtension
 }
 """;
 
-    private static string BuildScript(InstanceConfig inst)
+    private static string BuildScript(InstanceConfig inst, string? timeZone = null)
     {
+        var tz = timeZone ?? TimeZoneMap.DefaultTimeZone;
+        if (IsNoTimeZone(tz))
+        {
+            // 不伪装时区：让脚本内的时区覆盖整段失效
+            return ScriptTemplate
+                .Replace("{SEED}", ParseSeed(inst).ToString())
+                .Replace("{PROFILE}", DetectProfile(inst.UserAgent))
+                .Replace("{TIMEZONE}", TimeZoneMap.DefaultTimeZone)
+                .Replace("{TZ_OFFSET}", "null")
+                .Replace("{TZ_ENABLED}", "false");
+        }
+
+        var safeTz = SanitizeTimeZone(tz);
+        var offset = TimeZoneMap.OffsetOf(safeTz);
         return ScriptTemplate
             .Replace("{SEED}", ParseSeed(inst).ToString())
-            .Replace("{PROFILE}", DetectProfile(inst.UserAgent));
+            .Replace("{PROFILE}", DetectProfile(inst.UserAgent))
+            .Replace("{TIMEZONE}", safeTz)
+            .Replace("{TZ_OFFSET}", offset.ToString())
+            .Replace("{TZ_ENABLED}", "true");
+    }
+
+    /// <summary>
+    /// 时区白名单校验：仅允许 IANA 时区名合法字符（字母/数字/下划线/斜杠/加号/减号/点）。
+    /// 非法字符一律剔除，避免把内容注入到 JS 字符串字面量里。
+    /// </summary>
+    private static string SanitizeTimeZone(string tz)
+    {
+        var sb = new System.Text.StringBuilder(tz.Length);
+        foreach (var c in tz.Trim())
+        {
+            if (char.IsLetterOrDigit(c) || c is '_' or '/' or '+' or '-' or '.')
+                sb.Append(c);
+        }
+        var s = sb.ToString();
+        return s.Length == 0 ? TimeZoneMap.DefaultTimeZone : s;
     }
 
     private const string ScriptTemplate =
@@ -91,6 +150,9 @@ public static class FingerprintExtension
 
   var SEED = {SEED};
   var PROFILE = "{PROFILE}";
+  var TIMEZONE = "{TIMEZONE}";
+  var TZ_ENABLED = {TZ_ENABLED};
+  var TZ_OFFSET_MIN = {TZ_OFFSET};
   var isMobile = (PROFILE === "iphone") || (PROFILE === "android");
 
   function hash(x, y) {
@@ -149,14 +211,21 @@ public static class FingerprintExtension
     }
   } catch (e) { }
 
-  if (typeof Intl !== "undefined") {
+  if (TZ_ENABLED && typeof Intl !== "undefined") {
     try {
       var origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
       Intl.DateTimeFormat.prototype.resolvedOptions = function () {
         var o = origResolved.apply(this, arguments);
-        try { o.timeZone = "Asia/Shanghai"; } catch (e) { }
+        try { o.timeZone = TIMEZONE; } catch (e) { }
         return o;
       };
+      // 同时伪造 Date 的原生时区偏移，避免 getTimezoneOffset 与 Intl 结果不一致
+      if (TZ_OFFSET_MIN !== null) {
+        var origOffset = Date.prototype.getTimezoneOffset;
+        Date.prototype.getTimezoneOffset = function () {
+          try { return TZ_OFFSET_MIN; } catch (e) { return origOffset.apply(this, arguments); }
+        };
+      }
       var origDTF = Intl.DateTimeFormat;
       Intl.DateTimeFormat = function (loc, opt) {
         return new origDTF(loc || nav.lang, opt);
