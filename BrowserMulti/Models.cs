@@ -12,13 +12,48 @@ public class InstanceConfig
     public string UserAgent { get; set; } = "";
     public bool FpEnabled { get; set; } = true;
     public string FpSeed { get; set; } = "";
-    // v2 预留：每个实例独立代理（--proxy-server），第一版不开放编辑
+    /// <summary>分组/标签，用于归类（如"工作号""小号"），可留空</summary>
+    public string Group { get; set; } = "";
+    /// <summary>备注，仅本工具可见</summary>
+    public string Note { get; set; } = "";
+    /// <summary>附加启动参数，高级用户使用</summary>
+    public string ExtraArgs { get; set; } = "";
+    /// <summary>每个实例独立代理（--proxy-server），留空为直连</summary>
     public string ProxyServer { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime? LastLaunchedAt { get; set; }
+}
+
+public class AppSettings
+{
+    public string DefaultBrowserId { get; set; } = "auto";
+    public bool MinimizeToTray { get; set; } = true;
+    public bool ConfirmDuplicateLaunch { get; set; } = true;
+    public bool AutoCleanCacheOnStart { get; set; }
+    public int WindowWidth { get; set; } = 980;
+    public int WindowHeight { get; set; } = 620;
+    public int WindowX { get; set; } = -1;
+    public int WindowY { get; set; } = -1;
+    public bool WindowMaximized { get; set; }
+    public bool LogEnabled { get; set; } = true;
+    public string DefaultFpEnabled { get; set; } = "true";
 }
 
 public class AppConfig
 {
+    public int ConfigVersion { get; set; } = 2;
+    public AppSettings Settings { get; set; } = new();
+    public List<InstanceConfig> Instances { get; set; } = new();
+}
+
+/// <summary>用于导入导出的轻量载体（不含数据目录内容）。</summary>
+public class ExportBundle
+{
+    public string Format { get; set; } = "BrowserMulti-Config";
+    public int Version { get; set; } = 1;
+    public string ExportedBy { get; set; } = "jtxu9527";
+    public DateTime ExportedAt { get; set; } = DateTime.Now;
+    public int InstanceCount { get; set; }
     public List<InstanceConfig> Instances { get; set; } = new();
 }
 
@@ -56,4 +91,23 @@ public static class UaPresets
         if (string.IsNullOrWhiteSpace(ua)) return "默认";
         return All.FirstOrDefault(p => p.Value == ua)?.Name ?? "自定义";
     }
+}
+
+public static class AppMeta
+{
+    public const string Name = "浏览器多开管理器";
+    public const string EnglishName = "BrowserMulti";
+    public const string Version = "1.6.0";
+    public const string Author = "jtxu9527";
+    public const string RepoUrl = "https://github.com/redconfig9527/browser-multi";
+    public const string Copyright = "Copyright © 2026 jtxu9527 · MIT License";
+}
+
+public static class JsonHelper
+{
+    public static readonly JsonSerializerOptions Options = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 }
