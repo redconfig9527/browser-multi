@@ -27,6 +27,9 @@ public class SettingsDialog : Form
         _comboBrowser.DropDownStyle = ComboBoxStyle.DropDownList;
         _comboBrowser.SetBounds(150, y - 2, 288, 25);
         foreach (var c in choices) _comboBrowser.Items.Add(c);
+        // 防御：choices 为空时必须至少有一项，否则设置 SelectedIndex 会抛 ArgumentOutOfRangeException
+        if (_comboBrowser.Items.Count == 0)
+            _comboBrowser.Items.Add(new BrowserChoice("auto", "自动（默认浏览器）"));
         var idx = choices.FindIndex(c => c.Id == current.DefaultBrowserId);
         _comboBrowser.SelectedIndex = idx < 0 ? 0 : idx;
         Controls.Add(_comboBrowser);
