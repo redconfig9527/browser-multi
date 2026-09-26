@@ -75,14 +75,19 @@
 
 ## 从源码构建
 
-需要 .NET 10 SDK（VS2026 自带）：
+需要 .NET 10 SDK（VS2026 自带）。仓库根目录已包含解决方案文件 `BrowserMulti.sln`，可直接用 Visual Studio 打开（双击 .sln），或在命令行构建：
 
 ```bash
-cd BrowserMulti
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
+# 方式一：编译整个解决方案
+dotnet build BrowserMulti.sln -c Release
+
+# 方式二：直接发布为单文件 exe
+dotnet publish BrowserMulti/BrowserMulti.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
 ```
 
 产物为单文件 exe（约 620KB，需目标机器装有 .NET 10 桌面运行时）。
+
+> 说明：`bin/`、`obj/`、`.vs/` 均为本地构建产物与 IDE 缓存，已在 `.gitignore` 中排除，不会进入版本库。
 
 ## 重要说明与已知限制
 
@@ -104,8 +109,11 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 ## 目录结构
 
 ```
-BrowserMulti/                C# WinForms 源码
-├── BrowserMulti.csproj
+BrowserMulti.sln              Visual Studio 解决方案（双击打开）
+README.md                     本文件
+LICENSE                       MIT 许可证
+BrowserMulti/                 C# WinForms 源码
+├── BrowserMulti.csproj       项目文件
 ├── Program.cs               入口 + 全局异常捕获
 ├── MainForm.cs              主界面（菜单/列表/托盘/启动/快捷方式/导入导出）
 ├── InstanceDialog.cs        实例编辑（基本/身份与环境/高级 三个选项卡）
