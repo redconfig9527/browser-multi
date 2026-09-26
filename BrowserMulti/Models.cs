@@ -20,6 +20,13 @@ public class InstanceConfig
     public string ExtraArgs { get; set; } = "";
     /// <summary>每个实例独立代理（--proxy-server），留空为直连</summary>
     public string ProxyServer { get; set; } = "";
+    /// <summary>
+    /// 时区来源：
+    ///   ""            = 自动（配了代理则跟随代理出口地区，否则默认 Asia/Shanghai）
+    ///   "Asia/Tokyo"  = 手动指定固定时区
+    ///   "off"         = 不做时区伪装
+    /// </summary>
+    public string TimeZone { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime? LastLaunchedAt { get; set; }
 }
