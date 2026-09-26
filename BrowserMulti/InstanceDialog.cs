@@ -11,6 +11,8 @@ public class InstanceDialog : Form
     private readonly TextBox _txtNote = new();
     private readonly ComboBox _comboBrowser = new();
     private readonly ComboBox _comboUa = new();
+    private readonly ComboBox _comboTz = new();
+    private Label _tzHint = null!;
     private readonly CheckBox _chkFp = new();
     private readonly TabControl _tabs = new();
 
@@ -158,22 +160,42 @@ public class InstanceDialog : Form
 
     private void BuildAdvancedTab(TabPage page, InstanceConfig src)
     {
-        page.Controls.Add(new Label { Text = "代理服务器:", AutoSize = true, Location = new Point(16, 24) });
-        _txtProxy.SetBounds(120, 20, 330, 25);
+        page.Controls.Add(new Label { Text = "代理服务器:", AutoSize = true, Location = new Point(16, 20) });
+        _txtProxy.SetBounds(120, 16, 330, 25);
         _txtProxy.Text = src.ProxyServer;
         _txtProxy.PlaceholderText = "留空为直连，例：http://127.0.0.1:7890";
         page.Controls.Add(_txtProxy);
 
         page.Controls.Add(new Label
         {
-            Text = "格式：http://主机:端口  或  socks5://主机:端口。\n留空即直连。不同实例配置不同代理可实现 IP 隔离。",
+            Text = "格式：http://主机:端口  或  socks5://主机:端口。留空即直连。\n不同实例配置不同代理可实现 IP 隔离。",
             AutoSize = true,
             ForeColor = Color.Gray,
-            Location = new Point(120, 48)
+            Location = new Point(120, 44)
         });
 
-        page.Controls.Add(new Label { Text = "附加参数:", AutoSize = true, Location = new Point(16, 100) });
-        _txtExtra.SetBounds(120, 96, 330, 60);
+        page.Controls.Add(new Label { Text = "时区:", AutoSize = true, Location = new Point(16, 88) });
+        _comboTz.DropDownStyle = ComboBoxStyle.DropDownList;
+        _comboTz.SetBounds(120, 84, 330, 25);
+        foreach (var t in TimeZoneOptions) _comboTz.Items.Add(t.Display);
+        int tzIdx = TimeZoneOptions.FindIndex(t => string.Equals(t.Value, src.TimeZone?.Trim() ?? "",
+            StringComparison.OrdinalIgnoreCase));
+        _comboTz.SelectedIndex = tzIdx >= 0 ? tzIdx : 0;
+        _comboTz.SelectedIndexChanged += (_, _) => UpdateTzHint();
+        page.Controls.Add(_comboTz);
+
+        _tzHint = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            ForeColor = Color.Gray,
+            Location = new Point(120, 112)
+        };
+        page.Controls.Add(_tzHint);
+        UpdateTzHint();
+
+        page.Controls.Add(new Label { Text = "附加参数:", AutoSize = true, Location = new Point(16, 146) });
+        _txtExtra.SetBounds(120, 142, 330, 56);
         _txtExtra.Multiline = true;
         _txtExtra.ScrollBars = ScrollBars.Vertical;
         _txtExtra.Text = src.ExtraArgs;
@@ -185,18 +207,64 @@ public class InstanceDialog : Form
             Text = "原样追加到命令行。请勿填写 --user-data-dir / --user-agent，\n这两项由本工具管理，重复填写可能导致异常。",
             AutoSize = true,
             ForeColor = Color.FromArgb(160, 90, 0),
-            Location = new Point(120, 160)
+            Location = new Point(120, 202)
         });
 
-        page.Controls.Add(new Label { Text = "指纹种子（只读）:", AutoSize = true, Location = new Point(16, 210) });
+        page.Controls.Add(new Label { Text = "指纹种子（只读）:", AutoSize = true, Location = new Point(16, 246) });
         page.Controls.Add(new TextBox
         {
             Text = string.IsNullOrWhiteSpace(src.FpSeed) ? "尚未生成" : src.FpSeed,
             ReadOnly = true,
-            Bounds = new Rectangle(120, 206, 330, 25),
+            Bounds = new Rectangle(120, 242, 330, 25),
             BackColor = Color.FromArgb(245, 245, 245)
         });
     }
+
+    /// <summary>时区下拉项：Value 为实际存入配置的值，Display 为中文说明。</summary>
+    private static readonly List<(string Value, string Display)> TimeZoneOptions = new()
+    {
+        ("", "自动（有代理则跟随代理地区，否则中国时区）"),
+        ("Asia/Shanghai", "中国 · Asia/Shanghai (UTC+8)"),
+        ("Asia/Hong_Kong", "中国香港 · Asia/Hong_Kong (UTC+8)"),
+        ("Asia/Taipei", "中国台湾 · Asia/Taipei (UTC+8)"),
+        ("Asia/Tokyo", "日本 · Asia/Tokyo (UTC+9)"),
+        ("Asia/Seoul", "韩国 · Asia/Seoul (UTC+9)"),
+        ("Asia/Singapore", "新加坡 · Asia/Singapore (UTC+8)"),
+        ("Asia/Bangkok", "泰国 · Asia/Bangkok (UTC+7)"),
+        ("Asia/Kolkata", "印度 · Asia/Kolkata (UTC+5:30)"),
+        ("Asia/Dubai", "阿联酋 · Asia/Dubai (UTC+4)"),
+        ("Europe/London", "英国 · Europe/London (UTC+0)"),
+        ("Europe/Berlin", "德国 · Europe/Berlin (UTC+1)"),
+        ("Europe/Paris", "法国 · Europe/Paris (UTC+1)"),
+        ("Europe/Moscow", "俄罗斯 · Europe/Moscow (UTC+3)"),
+        ("America/New_York", "美东 · America/New_York (UTC-5)"),
+        ("America/Chicago", "美中 · America/Chicago (UTC-6)"),
+        ("America/Los_Angeles", "美西 · America/Los_Angeles (UTC-8)"),
+        ("America/Sao_Paulo", "巴西 · America/Sao_Paulo (UTC-3)"),
+        ("Australia/Sydney", "澳大利亚 · Australia/Sydney (UTC+10)"),
+        ("off", "不伪装时区"),
+    };
+
+    private void UpdateTzHint()
+    {
+        bool off = GetSelectedTimeZone() == "off";
+        bool auto = GetSelectedTimeZone() == "";
+        _tzHint.Text = off
+            ? "不改写时区，使用浏览器真实时区。"
+            : auto
+                ? "推荐：自动后时区会与代理出口地区保持一致，避免「境外 IP + 中国时区」的冲突。"
+                : "使用固定时区，与代理地区无关。";
+        _tzHint.ForeColor = auto ? Color.FromArgb(32, 92, 168) : Color.Gray;
+    }
+
+    /// <summary>当前选中的时区配置值。</summary>
+    private string GetSelectedTimeZone()
+    {
+        int i = _comboTz.SelectedIndex;
+        return i >= 0 && i < TimeZoneOptions.Count ? TimeZoneOptions[i].Value : "";
+    }
+
+    public string TimeZoneValue => GetSelectedTimeZone();
 
     protected override void OnShown(EventArgs e)
     {
@@ -245,7 +313,18 @@ public class InstanceDialog : Form
         if (!Uri.TryCreate(s, UriKind.Absolute, out var uri)) return false;
         if (uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "socks5" && uri.Scheme != "socks4")
             return false;
-        return uri.Port > 0 && uri.Host.Length > 0;
+        if (uri.Host.Length == 0) return false;
+        // Uri 会给 http/https 补默认端口，需按用户原始输入判断是否写了端口
+        if (uri.IsDefaultPort)
+        {
+            var afterAuth = uri.OriginalString[(uri.OriginalString.IndexOf("://", StringComparison.Ordinal) + 3)..];
+            var at = afterAuth.LastIndexOf('@');
+            var hostPart = at >= 0 ? afterAuth[(at + 1)..] : afterAuth;
+            var slash = hostPart.IndexOfAny(new[] { '/', '?', '#' });
+            if (slash >= 0) hostPart = hostPart[..slash];
+            if (!hostPart.Contains(':')) return false;
+        }
+        return true;
     }
 
     private static void Fail(string msg)
