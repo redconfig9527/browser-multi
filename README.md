@@ -29,12 +29,28 @@
 | WebGL | 厂商/渲染器伪装（RTX 3060 / Apple M2 / Adreno 740 按画像切换）+ readPixels 噪声 |
 | AudioContext | OfflineAudioContext 采样噪声 |
 | 字体枚举 | document.fonts.check 按种子过滤，Win/mac/Linux 三套字体名单 |
-| 语言/时区 | navigator.language(s) 按画像改写，时区锁定 Asia/Shanghai |
+| 语言 | navigator.language(s) 按画像改写 |
+| **时区** | **自动跟随代理出口地区**（可选手动指定 / 关闭），同时覆盖 `Intl` 与 `Date.getTimezoneOffset`，避免「境外 IP + 中国时区」的矛盾 |
 | 设备信息 | platform / hardwareConcurrency / deviceMemory / maxTouchPoints / plugins |
 | WebRTC | SDP 候选地址改写，防内网 IP 泄露 |
 | 移动端屏幕 | Screen 尺寸与 devicePixelRatio 按画像伪装 |
 
 - 指纹画像自动跟随 UA 预设（iPhone UA → iPhone 的 platform/屏幕/GPU），保证一致性
+
+### 时区与代理
+
+时区可避免与代理 IP 冲突，这是很常见的关联特征。在实例编辑的「高级」页设置：
+
+| 模式 | 行为 |
+|------|------|
+| **自动**（默认） | 配置了代理时，经由该代理查询出口地区并套用对应时区；无代理则用中国时区 |
+| **指定** | 固定使用某个时区（内置 20 个常用地区），与代理无关 |
+| **不伪装** | 保持浏览器真实时区 |
+
+覆盖范围包含 `Intl.DateTimeFormat().resolvedOptions().timeZone` 与 `Date.prototype.getTimezoneOffset()`，
+两者会同步改写，避免交叉检测出矛盾。
+
+> 代理地区查询需联网（依次尝试 ip-api.com / api.country.is / ipinfo.io），失败时静默回退为中国时区，不影响启动。结果按代理地址缓存，同一实例重复启动不会重复查询。
 
 ### 管理能力
 - **实例分组**：给实例打分组标签（工作号 / 小号），支持按分组筛选
@@ -93,7 +109,7 @@ dotnet publish BrowserMulti/BrowserMulti.csproj -c Release -r win-x64 --self-con
 
 1. **指纹防护仅对 Microsoft Edge 有效**。Chrome 137 起已移除 `--load-extension` 命令行参数，用 Chrome 启动时防护扩展不会加载（Cookie 隔离、UA 伪装不受影响）。界面会在默认浏览器设为 Chrome 时给出提示。
 2. **WebRTC 防护是 JS 层拦截**：若浏览器设置中关闭了「停用非代理 UDP」，公网 IP 仍可能通过 STUN 暴露。
-3. **时区固定为中国**（Asia/Shanghai）：若代理出口在境外，时区与 IP 会不一致。使用境外代理时建议同时把 UA 与代理地区对齐。
+3. **时区需与代理地区匹配**：已支持自动跟随（见上文「时区与代理」），但该功能依赖联网查询代理地区，离线或查询失败时会回退为中国时区，此时请改用「指定」模式手动对齐。
 4. **跨电脑迁移**：数据目录可整体拷贝，书签/历史/扩展/自动填充完整保留；但 **Cookie 与保存的密码**受 Windows DPAPI 绑定加密，换机后需重新登录一次。
 5. **字体防护通过 FontFaceSet 拦截实现**，无法覆盖基于测量宽度的底层字体探测，这是纯扩展方案的边界。
 6. **本程序不含浏览器内核**，调用系统已安装的 Edge / Chrome。
@@ -120,6 +136,8 @@ BrowserMulti/                 C# WinForms 源码
 ├── SettingsDialog.cs        设置对话框
 ├── AboutDialog.cs           关于对话框
 ├── Models.cs                数据模型、UA 预设、应用元信息
+├── TimeZoneMap.cs           国家→时区映射表（离线）
+├── ProxyGeoLookup.cs        经代理探测出口地区（用于时区跟随）
 ├── InstanceManager.cs       配置持久化、导入导出
 ├── BrowserDetector.cs       浏览器检测
 ├── FingerprintExtension.cs  指纹防护扩展生成器
