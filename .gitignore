@@ -1,0 +1,22 @@
+# 编译产物
+bin/
+obj/
+publish/
+
+# 运行时数据（含登录态，绝对不能上传）
+Data/
+instances.json
+
+# 可执行文件（成品通过 GitHub Release 发布）
+*.exe
+*.pdb
+
+# 工作区私有数据
+.workbuddy/
+
+# IDE / 临时
+.vs/
+*.user
+*.suo
+.icogen/
+*.png
