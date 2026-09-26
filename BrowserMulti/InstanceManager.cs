@@ -5,16 +5,31 @@ namespace BrowserMulti;
 public class InstanceManager
 {
     private readonly string _configPath;
+    private readonly string _baseDir;
 
     public AppConfig Config { get; private set; }
 
-    public InstanceManager()
+    /// <summary>
+    /// 创建配置管理器。
+    /// </summary>
+    /// <param name="baseDir">
+    /// 数据根目录（存放 instances.json / Data / logs）。
+    /// 留空则使用 <see cref="AppContext.BaseDirectory"/>（生产环境默认行为）。
+    /// 显式传入可让测试使用独立目录，避免用例之间互相污染。
+    /// </param>
+    public InstanceManager(string? baseDir = null)
     {
-        _configPath = Path.Combine(AppContext.BaseDirectory, "instances.json");
+        _baseDir = string.IsNullOrWhiteSpace(baseDir)
+            ? AppContext.BaseDirectory
+            : Path.GetFullPath(baseDir);
+        _configPath = Path.Combine(_baseDir, "instances.json");
         Config = Load();
     }
 
     public string ConfigPath => _configPath;
+
+    /// <summary>数据根目录（配置、Data、logs 都位于其下）。</summary>
+    public string BaseDir => _baseDir;
 
     private AppConfig Load()
     {
@@ -81,8 +96,9 @@ public class InstanceManager
         }
     }
 
-    public static string GetDataDir(InstanceConfig inst)
-        => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Data", inst.Id));
+    /// <summary>实例的数据目录（绝对路径），位于自身 BaseDir 下的 Data\&lt;实例ID&gt;。</summary>
+    public string GetDataDir(InstanceConfig inst)
+        => Path.GetFullPath(Path.Combine(_baseDir, "Data", inst.Id));
 
     /// <summary>导出实例配置（不含 Cookie 等数据目录内容）。</summary>
     public void ExportBundle(IEnumerable<InstanceConfig> instances, string targetPath)
@@ -104,6 +120,7 @@ public class InstanceManager
                 Note = i.Note,
                 ExtraArgs = i.ExtraArgs,
                 ProxyServer = i.ProxyServer,
+                TimeZone = i.TimeZone,
                 CreatedAt = i.CreatedAt
             }).ToList()
         };
@@ -149,6 +166,7 @@ public class InstanceManager
                 Note = src.Note,
                 ExtraArgs = src.ExtraArgs,
                 ProxyServer = src.ProxyServer,
+                TimeZone = src.TimeZone,
                 CreatedAt = src.CreatedAt
             });
             added++;
