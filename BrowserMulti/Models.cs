@@ -29,14 +29,12 @@ public class AppSettings
     public string DefaultBrowserId { get; set; } = "auto";
     public bool MinimizeToTray { get; set; } = true;
     public bool ConfirmDuplicateLaunch { get; set; } = true;
-    public bool AutoCleanCacheOnStart { get; set; }
     public int WindowWidth { get; set; } = 980;
     public int WindowHeight { get; set; } = 620;
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
     public bool WindowMaximized { get; set; }
     public bool LogEnabled { get; set; } = true;
-    public string DefaultFpEnabled { get; set; } = "true";
 }
 
 public class AppConfig
