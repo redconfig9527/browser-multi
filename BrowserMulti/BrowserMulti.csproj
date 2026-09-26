@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <RootNamespace>BrowserMulti</RootNamespace>
+    <AssemblyName>BrowserMulti</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>1.5.0</Version>
+    <Authors>jtxu9527</Authors>
+    <Company>jtxu9527</Company>
+    <Product>浏览器多开管理器</Product>
+    <AssemblyTitle>浏览器多开管理器</AssemblyTitle>
+    <Copyright>Copyright © 2026 jtxu9527</Copyright>
+    <Description>基于独立用户数据目录的浏览器多开与 Cookie 隔离工具，内置 UA 伪装与指纹防护。作者：jtxu9527</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>
