@@ -21,6 +21,28 @@ public static class Log
         catch { _enabled = false; }
     }
 
+    /// <summary>运行期切换日志开关（设置保存时调用），并保证目录存在。</summary>
+    public static void SetEnabled(bool enabled)
+    {
+        if (enabled && !_enabled)
+        {
+            _enabled = true;
+            try
+            {
+                if (!string.IsNullOrEmpty(_dir))
+                {
+                    Directory.CreateDirectory(_dir);
+                    Info($"===== {AppMeta.Name} 日志已开启 =====");
+                }
+            }
+            catch { _enabled = false; }
+        }
+        else
+        {
+            _enabled = enabled;
+        }
+    }
+
     public static void Info(string msg) => Write("INFO ", msg);
     public static void Warn(string msg) => Write("WARN ", msg);
     public static void Error(string msg, Exception? ex = null)
