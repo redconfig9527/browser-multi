@@ -60,16 +60,24 @@ public class InstanceManager
 
     public void Save()
     {
+        var tmp = _configPath + ".tmp";
         try
         {
-            var tmp = _configPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(Config, JsonHelper.Options));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(Config, JsonHelper.Options),
+                new System.Text.UTF8Encoding(false));
             if (File.Exists(_configPath)) File.Replace(tmp, _configPath, null);
             else File.Move(tmp, _configPath);
         }
         catch (Exception ex)
         {
+            // 清理可能残留的临时文件，避免下次 Save 时被误用
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
             Log.Error("保存配置失败", ex);
+            // 配置丢失是严重问题，必须让用户知道（而不是静默失败）
+            MessageBox.Show(
+                $"保存配置失败：{ex.Message}\n\n" +
+                "本次修改可能未写入磁盘，请检查程序目录是否可写（是否被杀毒软件锁定）。",
+                "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -110,10 +118,17 @@ public class InstanceManager
         var bundle = JsonSerializer.Deserialize<ExportBundle>(json, JsonHelper.Options)
                      ?? throw new InvalidDataException("文件格式不正确");
 
+        // 防御：旧版或手工编辑的文件可能缺 Instances，或含空名条目
+        if (bundle.Instances == null || bundle.Instances.Count == 0)
+            throw new InvalidDataException("文件中没有可导入的实例");
+
         int added = 0, skipped = 0;
         foreach (var src in bundle.Instances)
         {
-            if (Config.Instances.Any(x => x.Name == src.Name))
+            if (src == null) { skipped++; continue; }
+
+            var name = string.IsNullOrWhiteSpace(src.Name) ? "未命名实例" : src.Name.Trim();
+            if (Config.Instances.Any(x => x.Name == name))
             {
                 skipped++;
                 continue;
@@ -122,7 +137,7 @@ public class InstanceManager
             Config.Instances.Add(new InstanceConfig
             {
                 Id = regenerateIdsAndSeeds ? Guid.NewGuid().ToString("N") : src.Id,
-                Name = src.Name,
+                Name = name,
                 BrowserId = src.BrowserId,
                 HomePage = src.HomePage,
                 UserAgent = src.UserAgent,
